@@ -521,6 +521,7 @@ def _process_and_sign_archive(
                 "$WORK_DIR/" + bundle_path_in_archive + "/" + frameworks,
                 optional = True,
                 glob = "*",
+                use_entitlements = False,
             ),
         ]
         is_device = platform_support.is_device_build(ctx)
