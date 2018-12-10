@@ -15,22 +15,6 @@
 """Actions used to process resources in Apple bundles."""
 
 load(
-    "@bazel_skylib//lib:collections.bzl",
-    "collections",
-)
-load(
-    "@bazel_skylib//lib:partial.bzl",
-    "partial",
-)
-load(
-    "@bazel_skylib//lib:paths.bzl",
-    "paths",
-)
-load(
-    "@bazel_skylib//lib:new_sets.bzl",
-    "sets",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:bundling_support.bzl",
     "bundling_support",
 )
@@ -61,6 +45,22 @@ load(
 load(
     "@build_bazel_rules_apple//common:path_utils.bzl",
     "path_utils",
+)
+load(
+    "@bazel_skylib//lib:collections.bzl",
+    "collections",
+)
+load(
+    "@bazel_skylib//lib:new_sets.bzl",
+    "sets",
+)
+load(
+    "@bazel_skylib//lib:partial.bzl",
+    "partial",
+)
+load(
+    "@bazel_skylib//lib:paths.bzl",
+    "paths",
 )
 
 # Sentinel value used as the key in the dictionary returned by
@@ -822,7 +822,7 @@ def _momc(ctx, input_files, resource_info):
         # Add the .xccurrentversion file back if this was a versioned model so that
         # it gets included as an input to the action.
         if model in xccurrentversions:
-            children += depset([xccurrentversions[model]])
+            children = depset([xccurrentversions[model]], transitive = [children])
 
         model_name = paths.split_extension(paths.basename(model))[0]
         if model.endswith(".xcdatamodeld"):
@@ -860,7 +860,7 @@ def _momc(ctx, input_files, resource_info):
 
         platform_support.xcode_env_action(
             ctx,
-            inputs = list(children),
+            inputs = children.to_list(),
             outputs = [out_file],
             executable = ctx.executable._xctoolrunner,
             arguments = args,
@@ -1052,25 +1052,34 @@ def _process_single_resource_grouping(
 
             # Collect the results from the individual actions.
             for result in action_results:
-                bundle_merge_files = (
-                    bundle_merge_files | getattr(result, "bundle_merge_files", [])
-                )
-                compiled_storyboards = (
-                    compiled_storyboards | getattr(result, "compiled_storyboards", [])
-                )
-                partial_infoplists = (
-                    partial_infoplists | getattr(result, "partial_infoplists", [])
-                )
+                new_items = getattr(result, "bundle_merge_files", None)
+                if new_items:
+                    bundle_merge_files = depset(
+                        transitive = [new_items, bundle_merge_files],
+                    )
+                new_items = getattr(result, "compiled_storyboards", None)
+                if new_items:
+                    compiled_storyboards = depset(
+                        transitive = [new_items, compiled_storyboards],
+                    )
+                new_items = getattr(result, "partial_infoplists", None)
+                if new_items:
+                    partial_infoplists = depset(
+                        transitive = [new_items, partial_infoplists],
+                    )
         else:
             # Add any unprocessed resources to the list of files that will just be
             # copied into the bundle.
-            bundle_merge_files = bundle_merge_files | depset([
-                bundling_support.resource_file(ctx, f, optionally_prefixed_path(
-                    resource_info.path_transform(f),
-                    resource_info.bundle_dir,
-                ))
-                for f in filtered_files
-            ])
+            bundle_merge_files = depset(
+                [
+                    bundling_support.resource_file(ctx, f, optionally_prefixed_path(
+                        resource_info.path_transform(f),
+                        resource_info.bundle_dir,
+                    ))
+                    for f in filtered_files
+                ],
+                transitive = [bundle_merge_files],
+            )
 
     return struct(
         bundle_merge_files = bundle_merge_files,

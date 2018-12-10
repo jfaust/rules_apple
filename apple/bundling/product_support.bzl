@@ -25,10 +25,73 @@ load(
     "attrs",
 )
 
+# Product type identifiers used to describe various bundle types.
+#
+# The "product type" is a concept used internally by Xcode (the strings themselves
+# are visible inside the `.pbxproj` file) that describes properties of the bundle,
+# such as its default extension.
+#
+# Additionally, products like iMessage applications and sticker packs in iOS 10
+# require a stub executable instead of a user-defined binary and additional values
+# injected into their `Info.plist` files. These behaviors are also captured in the
+# product type identifier. The product types currently supported are:
+#
+# * `application`: A basic iOS, macOS, or tvOS application. This is the default
+#   product type for those targets; it can be overridden with a more specific
+#   product type if needed.
+# * `app_extension`: A basic iOS, macOS, or tvOS application extension. This is
+#   the default product type for those targets; it can be overridden with a more
+#   specific product type if needed.
+# * `bundle`: A loadable macOS bundle. This is the default product type for
+#   `macos_bundle` targets; it can be overridden with a more specific product type
+#   if needed.
+# * `dylib`: A dynamically-loadable library. This is the default product type for
+#   `macos_dylib`; it does not need to be set explicitly (and cannot be changed).
+# * `framework`: A basic dynamic framework. This is the default product type for
+#   those targets; it does not need to be set explicitly (and cannot be changed).
+# * `kernel_extension`: A macOS kernel extension. This product type should be used
+#   with a `macos_bundle` target to create such a plug-in; the built bundle will
+#   have the extension `.kext`.
+# * `messages_application`: An application that integrates with the Messages
+#   app (iOS 10 and above). This application must include an `ios_extension`
+#   with the `messages_extension` or `messages_sticker_pack_extension` product
+#   type (or both extensions). This product type does not contain a user-provided
+#   binary.
+# * `messages_extension`: An extension that integrates custom code/behavior into
+#   a Messages application. This product type should contain a user-provided
+#   binary.
+# * `messages_sticker_pack_extension`: An extension that defines custom sticker
+#   packs for the Messages app. This product type does not contain a
+#   user-provided binary.
+# * `spotlight_importer`: A macOS Spotlight importer plug-in. This product type
+#   should be used with a `macos_bundle` target to create such a plug-in; the
+#   built bundle will have the extension `.mdimporter`.
+# * `static_framework`: An iOS static framework, which is a `.framework` bundle
+#   that contains resources and headers but a static library instead of a dynamic
+#   library.
+# * `tool`: A command-line tool. This is the default product type for
+#   `macos_command_line_application`; it does not need to be set explicitly (and
+#   cannot be changed).
+# * `ui_test_bundle`: A UI testing bundle (.xctest). This is the default product
+#   type for those targets; it does not need to be set explicitly (and cannot be
+#   changed).
+# * `unit_test_bundle`: A unit test bundle (.xctest). This is the default product
+#   type for those targets; it does not need to be set explicitly (and cannot be
+#   changed).
+# * `watch2_application`: A watchOS 2+ application. This is the default product
+#   type for those targets; it does not need to be set explicitly (and cannot be
+#   changed).
+# * `watch2_extension`: A watchOS 2+ application extension. This is the default
+#   product type for those targets; it does not need to be set explicitly (and
+#   cannot be changed).
+# * `xpc_service`: A macOS XPC service. This product type should be used with a
+#   `macos_application` target to create such a service; the built bundle will
+#   have the extension `.xpc`.
 apple_product_type = struct(
     application = "com.apple.product-type.application",
     app_extension = "com.apple.product-type.app-extension",
     bundle = "com.apple.product-type.bundle",
+    dylib = "com.apple.product-type.library.dynamic",
     framework = "com.apple.product-type.framework",
     kernel_extension = "com.apple.product-type.kernel-extension",
     messages_application = "com.apple.product-type.application.messages",
@@ -45,68 +108,6 @@ apple_product_type = struct(
     watch2_extension = "com.apple.product-type.watchkit2-extension",
     xpc_service = "com.apple.product-type.xpc-service",
 )
-"""
-Product type identifiers used to describe various bundle types.
-
-The "product type" is a concept used internally by Xcode (the strings themselves
-are visible inside the `.pbxproj` file) that describes properties of the bundle,
-such as its default extension.
-
-Additionally, products like iMessage applications and sticker packs in iOS 10
-require a stub executable instead of a user-defined binary and additional values
-injected into their `Info.plist` files. These behaviors are also captured in the
-product type identifier. The product types currently supported are:
-
-* `application`: A basic iOS, macOS, or tvOS application. This is the default
-  product type for those targets; it can be overridden with a more specific
-  product type if needed.
-* `app_extension`: A basic iOS, macOS, or tvOS application extension. This is
-  the default product type for those targets; it can be overridden with a more
-  specific product type if needed.
-* `bundle`: A loadable macOS bundle. This is the default product type for
-  `macos_bundle` targets; it can be overridden with a more specific product type
-  if needed.
-* `framework`: A basic dynamic framework. This is the default product type for
-  those targets; it does not need to be set explicitly (and cannot be changed).
-* `kernel_extension`: A macOS kernel extension. This product type should be used
-  with a `macos_bundle` target to create such a plug-in; the built bundle will
-  have the extension `.kext`.
-* `messages_application`: An application that integrates with the Messages
-  app (iOS 10 and above). This application must include an `ios_extension`
-  with the `messages_extension` or `messages_sticker_pack_extension` product
-  type (or both extensions). This product type does not contain a user-provided
-  binary.
-* `messages_extension`: An extension that integrates custom code/behavior into
-  a Messages application. This product type should contain a user-provided
-  binary.
-* `messages_sticker_pack_extension`: An extension that defines custom sticker
-  packs for the Messages app. This product type does not contain a
-  user-provided binary.
-* `spotlight_importer`: A macOS Spotlight importer plug-in. This product type
-  should be used with a `macos_bundle` target to create such a plug-in; the
-  built bundle will have the extension `.mdimporter`.
-* `static_framework`: An iOS static framework, which is a `.framework` bundle
-  that contains resources and headers but a static library instead of a dynamic
-  library.
-* `tool`: A command-line tool. This is the default product type for
-  `macos_command_line_application`; it does not need to be set explicitly (and
-  cannot be changed).
-* `ui_test_bundle`: A UI testing bundle (.xctest). This is the default product
-  type for those targets; it does not need to be set explicitly (and cannot be
-  changed).
-* `unit_test_bundle`: A unit test bundle (.xctest). This is the default product
-  type for those targets; it does not need to be set explicitly (and cannot be
-  changed).
-* `watch2_application`: A watchOS 2+ application. This is the default product
-  type for those targets; it does not need to be set explicitly (and cannot be
-  changed).
-* `watch2_extension`: A watchOS 2+ application extension. This is the default
-  product type for those targets; it does not need to be set explicitly (and
-  cannot be changed).
-* `xpc_service`: A macOS XPC service. This product type should be used with a
-  `macos_application` target to create such a service; the built bundle will
-  have the extension `.xpc`.
-"""
 
 def _describe_stub(
         xcenv_based_path,
@@ -167,6 +168,9 @@ _PRODUCT_TYPE_DESCRIPTORS = {
     ),
     apple_product_type.bundle: _describe_product_type(
         bundle_extension = ".bundle",
+    ),
+    apple_product_type.dylib: _describe_product_type(
+        bundle_extension = ".dylib",
     ),
     apple_product_type.framework: _describe_product_type(
         bundle_extension = ".framework",
@@ -231,6 +235,21 @@ _PRODUCT_TYPE_DESCRIPTORS = {
     ),
 }
 
+def _contains_stub_binary(ctx):
+    """Returns whether the current product type contains a stub binary.
+
+    Args:
+      ctx: The Skylark context.
+
+    Returns:
+      True if the current target contains a stub binary, False otherwise.
+    """
+    product_type = _product_type(ctx)
+    product_type_descriptor = _product_type_descriptor(product_type)
+    if product_type_descriptor and product_type_descriptor.stub:
+        return True
+    return False
+
 def _product_type(ctx):
     """Returns the product type identifier for the current target.
 
@@ -274,6 +293,7 @@ def _product_type_descriptor(product_type):
 
 # Define the loadable module that lists the exported symbols in this file.
 product_support = struct(
+    contains_stub_binary = _contains_stub_binary,
     product_type = _product_type,
     product_type_descriptor = _product_type_descriptor,
 )

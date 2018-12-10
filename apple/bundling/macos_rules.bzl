@@ -23,10 +23,6 @@ wrapping macro because rules cannot invoke other rules.
 """
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:binary_support.bzl",
     "binary_support",
 )
@@ -59,6 +55,16 @@ load(
     "rule_factory",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal:experimental.bzl",
+    "is_experimental_bundling_enabled",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:macos_rules.bzl",
+    experimental_macos_application_impl = "macos_application_impl",
+    experimental_macos_bundle_impl = "macos_bundle_impl",
+    experimental_macos_extension_impl = "macos_extension_impl",
+)
+load(
     "@build_bazel_rules_apple//apple:providers.bzl",
     "AppleBundleInfo",
     "AppleBundleVersionInfo",
@@ -75,6 +81,10 @@ load(
     "@build_bazel_rules_apple//common:providers.bzl",
     "providers",
 )
+load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
+)
 
 # Attributes that are common to all macOS bundles.
 _COMMON_MACOS_BUNDLE_ATTRS = {
@@ -87,9 +97,9 @@ def _additional_contents_bundlable_files(ctx, file_map):
     """Gathers the additional Contents files in a macOS bundle.
 
     This function takes the label-keyed dictionary represented by `file_map` and
-    gathers the files from all of those targets, transforming them into bundlable
-    file objects that place the file in the appropriate subdirectory of the
-    bundle's Contents folder.
+    gathers the files from all of those non-bundle targets, transforming them into
+    bundlable file objects that place the file in the appropriate subdirectory of
+    the bundle's Contents folder.
 
     Args:
       ctx: The rule context.
@@ -101,16 +111,50 @@ def _additional_contents_bundlable_files(ctx, file_map):
     bundlable_files = []
 
     for target, contents_subdir in file_map.items():
-        bundlable_files.extend([bundling_support.contents_file(
-            ctx,
-            f,
-            contents_subdir + "/" + path_utils.owner_relative_path(f),
-        ) for f in target.files])
+        if AppleBundleInfo not in target:
+            bundlable_files.extend([bundling_support.contents_file(
+                ctx,
+                f,
+                contents_subdir + "/" + path_utils.owner_relative_path(f),
+            ) for f in target.files])
 
     return depset(bundlable_files)
 
+def _additional_contents_embedded_bundles(ctx, file_map):
+    """Gathers the additional Contents embedded bundles in a macOS bundle.
+
+    This function takes the label-keyed dictionary represented by `file_map` and
+    gathers the bundles from all of those targets, returning values that represent
+    embedded bundles within another bundle.
+
+    These values are used by the bundler to indicate how dependencies that are
+    themselves bundles (such as extensions or frameworks) should be bundled in
+    the application or target that depends on them.
+
+    Args:
+      ctx: The rule context.
+      file_map: The label-keyed dictionary.
+
+    Returns:
+      A list of embeddable bundles gathered from the targets.
+    """
+    _ignore = (ctx,)
+    embedded_bundles = []
+
+    for target, contents_subdir in file_map.items():
+        if AppleBundleInfo in target:
+            embedded_bundles.append(bundling_support.embedded_bundle(
+                contents_subdir,
+                target,
+                verify_has_child_plist = False,
+            ))
+
+    return embedded_bundles
+
 def _macos_application_impl(ctx):
     """Implementation of the macos_application rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_macos_application_impl(ctx)
 
     app_icons = ctx.files.app_icons
     if app_icons:
@@ -128,7 +172,7 @@ def _macos_application_impl(ctx):
         ))
 
     # TODO(b/36557429): Add support for macOS frameworks.
-    embedded_bundles = [
+    extensions = [
         bundling_support.embedded_bundle(
             "PlugIns",
             extension,
@@ -154,7 +198,10 @@ def _macos_application_impl(ctx):
             ctx.attr.additional_contents,
         ),
         additional_resource_sets = additional_resource_sets,
-        embedded_bundles = embedded_bundles,
+        embedded_bundles = extensions + _additional_contents_embedded_bundles(
+            ctx,
+            ctx.attr.additional_contents,
+        ),
         deps_objc_providers = [deps_objc_provider],
     )
 
@@ -202,6 +249,9 @@ macos_application = rule_factory.make_bundling_rule(
 
 def _macos_bundle_impl(ctx):
     """Implementation of the macos_bundle rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_macos_bundle_impl(ctx)
+
     app_icons = ctx.files.app_icons
     if app_icons:
         bundling_support.ensure_single_xcassets_type(
@@ -219,9 +269,19 @@ def _macos_bundle_impl(ctx):
 
     # TODO(b/36557429): Add support for macOS frameworks.
 
+    binary_provider_type = apple_common.AppleLoadableBundleBinary
+
+    # Kernel extensions on macOS have a mach header file type of MH_KEXT_BUNDLE.
+    # The -kext linker flag is used to produce these binaries.
+    # No userspace technologies can be linked into a KEXT.
+    # Using an "executable" to get around the extra userspace linker flags
+    # that are added to a "loadable_bundle".
+    if ctx.attr.product_type == apple_product_type.kernel_extension:
+        binary_provider_type = apple_common.AppleExecutableBinary
+
     binary_provider = binary_support.get_binary_provider(
         ctx.attr.deps,
-        apple_common.AppleLoadableBundleBinary,
+        binary_provider_type,
     )
     binary_artifact = binary_provider.binary
     deps_objc_providers = providers.find_all(ctx.attr.deps, apple_common.Objc)
@@ -236,6 +296,10 @@ def _macos_bundle_impl(ctx):
             ctx.attr.additional_contents,
         ),
         additional_resource_sets = additional_resource_sets,
+        embedded_bundles = _additional_contents_embedded_bundles(
+            ctx,
+            ctx.attr.additional_contents,
+        ),
         deps_objc_providers = deps_objc_providers,
     )
 
@@ -260,7 +324,10 @@ macos_bundle = rule_factory.make_bundling_rule(
         },
     ),
     archive_extension = ".zip",
-    binary_providers = [apple_common.AppleLoadableBundleBinary],
+    binary_providers = [
+        [apple_common.AppleLoadableBundleBinary],
+        [apple_common.AppleExecutableBinary],
+    ],
     bundles_frameworks = True,
     code_signing = rule_factory.code_signing(
         ".provisionprofile",
@@ -356,18 +423,16 @@ macos_command_line_application = rule(
             "binary": attr.label(
                 mandatory = True,
                 providers = [apple_common.AppleExecutableBinary],
-                single_file = True,
+                allow_single_file = True,
             ),
             "bundle_id": attr.string(mandatory = False),
             "infoplists": attr.label_list(
                 allow_files = [".plist"],
                 mandatory = False,
-                non_empty = False,
             ),
             "launchdplists": attr.label_list(
                 allow_files = [".plist"],
                 mandatory = False,
-                non_empty = False,
             ),
             "minimum_os_version": attr.string(mandatory = False),
             "version": attr.label(providers = [[AppleBundleVersionInfo]]),
@@ -380,8 +445,107 @@ macos_command_line_application = rule(
     fragments = ["apple", "objc"],
 )
 
+def _macos_dylib_impl(ctx):
+    """Implementation of the macos_dylib rule."""
+    output_file = ctx.actions.declare_file(ctx.label.name + ".dylib")
+
+    outputs = []
+
+    debug_outputs = ctx.attr.binary[apple_common.AppleDebugOutputs]
+    if debug_outputs:
+        # Create a .dSYM bundle with the expected name next to the binary in the
+        # output directory.
+        if ctx.fragments.objc.generate_dsym:
+            symbol_bundle = debug_symbol_actions.create_symbol_bundle(
+                ctx,
+                debug_outputs,
+                ctx.label.name,
+            )
+            outputs.extend(symbol_bundle)
+
+        if ctx.fragments.objc.generate_linkmap:
+            linkmaps = debug_symbol_actions.collect_linkmaps(
+                ctx,
+                debug_outputs,
+                ctx.label.name,
+            )
+            outputs.extend(linkmaps)
+
+    # It's not hermetic to sign the binary that was built by the apple_binary
+    # target that this rule takes as an input, so we copy it and then execute the
+    # code signing commands on that copy in the same action.
+    path_to_sign = codesigning_support.path_to_sign(output_file.path)
+    signing_commands = codesigning_support.signing_command_lines(
+        ctx,
+        [path_to_sign],
+        None,
+    )
+
+    inputs = [ctx.file.binary]
+
+    platform_support.xcode_env_action(
+        ctx,
+        inputs = inputs,
+        outputs = [output_file],
+        command = [
+            "/bin/bash",
+            "-c",
+            "cp {input_binary} {output_binary}".format(
+                input_binary = ctx.file.binary.path,
+                output_binary = output_file.path,
+            ) + "\n" + signing_commands,
+        ],
+        mnemonic = "SignBinary",
+    )
+
+    outputs.append(output_file)
+    return [
+        DefaultInfo(
+            executable = output_file,
+            files = depset(direct = outputs),
+        ),
+    ]
+
+macos_dylib = rule(
+    _macos_dylib_impl,
+    attrs = dicts.add(
+        rule_factory.common_tool_attributes,
+        rule_factory.code_signing_attributes(
+            rule_factory.code_signing(
+                ".provisionprofile",
+                requires_signing_for_device = False,
+            ),
+        ),
+        {
+            # TODO(b/73292865): Replace "binary" with "deps" when Tulsi
+            # migrates off of "binary".
+            "binary": attr.label(
+                mandatory = True,
+                providers = [apple_common.AppleDylibBinary],
+                single_file = True,
+            ),
+            "bundle_id": attr.string(mandatory = False),
+            "infoplists": attr.label_list(
+                allow_files = [".plist"],
+                mandatory = False,
+                non_empty = False,
+            ),
+            "minimum_os_version": attr.string(mandatory = False),
+            "version": attr.label(providers = [[AppleBundleVersionInfo]]),
+            "_platform_type": attr.string(
+                default = str(apple_common.platform_type.macos),
+            ),
+        },
+    ),
+    executable = False,
+    fragments = ["apple", "objc"],
+)
+
 def _macos_extension_impl(ctx):
     """Implementation of the macos_extension rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_macos_extension_impl(ctx)
+
     app_icons = ctx.files.app_icons
     if app_icons:
         bundling_support.ensure_single_xcassets_type(
@@ -414,6 +578,10 @@ def _macos_extension_impl(ctx):
             ctx.attr.additional_contents,
         ),
         additional_resource_sets = additional_resource_sets,
+        embedded_bundles = _additional_contents_embedded_bundles(
+            ctx,
+            ctx.attr.additional_contents,
+        ),
         deps_objc_providers = [deps_objc_provider],
     )
 

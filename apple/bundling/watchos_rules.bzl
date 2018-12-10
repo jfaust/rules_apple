@@ -36,7 +36,15 @@ load(
     "@build_bazel_rules_apple//apple/bundling:rule_factory.bzl",
     "rule_factory",
 )
-load("@build_bazel_rules_apple//apple/bundling:run_actions.bzl", "run_actions")
+load(
+    "@build_bazel_rules_apple//apple/internal:experimental.bzl",
+    "is_experimental_bundling_enabled",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:watchos_rules.bzl",
+    experimental_watchos_application_impl = "watchos_application_impl",
+    experimental_watchos_extension_impl = "watchos_extension_impl",
+)
 load(
     "@build_bazel_rules_apple//apple:providers.bzl",
     "AppleBundleInfo",
@@ -47,6 +55,8 @@ load(
 
 def _watchos_application_impl(ctx):
     """Implementation of the watchos_application Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_watchos_application_impl(ctx)
 
     app_icons = ctx.files.app_icons
     if app_icons:
@@ -129,6 +139,8 @@ watchos_application = rule_factory.make_bundling_rule(
 
 def _watchos_extension_impl(ctx):
     """Implementation of the watchos_extension Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_watchos_extension_impl(ctx)
 
     app_icons = ctx.files.app_icons
     if app_icons:

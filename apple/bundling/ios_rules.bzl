@@ -56,6 +56,25 @@ load(
     "run_actions",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal/aspects:framework_import_aspect.bzl",
+    "framework_import_aspect",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl",
+    new_apple_resource_aspect = "apple_resource_aspect",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:experimental.bzl",
+    "is_experimental_bundling_enabled",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:ios_rules.bzl",
+    experimental_ios_application_impl = "ios_application_impl",
+    experimental_ios_extension_impl = "ios_extension_impl",
+    experimental_ios_framework_impl = "ios_framework_impl",
+    experimental_ios_static_framework_impl = "ios_static_framework_impl",
+)
+load(
     "@build_bazel_rules_apple//apple:providers.bzl",
     "AppleBundleInfo",
     "AppleResourceSet",
@@ -72,6 +91,8 @@ load(
 
 def _ios_application_impl(ctx):
     """Implementation of the ios_application Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_ios_application_impl(ctx)
 
     app_icons = ctx.files.app_icons
     if app_icons:
@@ -174,16 +195,20 @@ ios_application = rule_factory.make_bundling_rule(
         "dedupe_unbundled_resources": attr.bool(default = True),
         "extensions": attr.label_list(
             providers = [[AppleBundleInfo, IosExtensionBundleInfo]],
+            aspects = [framework_import_aspect],
         ),
         "frameworks": attr.label_list(
             providers = [[AppleBundleInfo, IosFrameworkBundleInfo]],
+            aspects = [framework_import_aspect],
         ),
         "launch_images": attr.label_list(allow_files = True),
         "launch_storyboard": attr.label(
-            allow_files = [".storyboard", ".xib"],
-            single_file = True,
+            allow_single_file = [".storyboard", ".xib"],
         ),
-        "settings_bundle": attr.label(providers = [["objc"]]),
+        "settings_bundle": attr.label(
+            aspects = [new_apple_resource_aspect],
+            providers = [["objc"]],
+        ),
         "watch_application": attr.label(
             providers = [[AppleBundleInfo, WatchosApplicationBundleInfo]],
         ),
@@ -209,6 +234,8 @@ ios_application = rule_factory.make_bundling_rule(
 
 def _ios_extension_impl(ctx):
     """Implementation of the ios_extension Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_ios_extension_impl(ctx)
 
     app_icons = ctx.files.app_icons
     if app_icons:
@@ -310,6 +337,9 @@ ios_extension = rule_factory.make_bundling_rule(
 
 def _ios_framework_impl(ctx):
     """Implementation of the ios_framework Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_ios_framework_impl(ctx)
+
     binary_provider = binary_support.get_binary_provider(
         ctx.attr.deps,
         apple_common.AppleDylibBinary,
@@ -370,6 +400,9 @@ ios_framework = rule_factory.make_bundling_rule(
 
 def _ios_static_framework_impl(ctx):
     """Implementation of the _ios_static_framework Skylark rule."""
+    if is_experimental_bundling_enabled(ctx):
+        return experimental_ios_static_framework_impl(ctx)
+
     bundle_name = bundling_support.bundle_name(ctx)
     hdr_files = ctx.files.hdrs
     framework_files = [bundling_support.header_prefix(f) for f in hdr_files]

@@ -15,10 +15,6 @@
 """Internal helper definitions used by macOS command line rules."""
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:linker_support.bzl",
     "linker_support",
 )
@@ -37,6 +33,10 @@ load(
 load(
     "@build_bazel_rules_apple//apple:providers.bzl",
     "AppleBundleVersionInfo",
+)
+load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
 )
 
 def _macos_command_line_infoplist_impl(ctx):
@@ -93,7 +93,7 @@ macos_command_line_infoplist = rule(
             "infoplists": attr.label_list(
                 allow_files = [".plist"],
                 mandatory = False,
-                non_empty = False,
+                allow_empty = True,
             ),
             "minimum_os_version": attr.string(mandatory = False),
             "version": attr.label(providers = [[AppleBundleVersionInfo]]),
@@ -137,7 +137,6 @@ macos_command_line_launchdplist = rule(
             "launchdplists": attr.label_list(
                 allow_files = [".plist"],
                 mandatory = False,
-                non_empty = False,
             ),
         },
     ),

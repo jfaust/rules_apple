@@ -15,10 +15,6 @@
 """Actions that manipulate entitlements and provisioning profiles."""
 
 load(
-    "@build_bazel_rules_apple//apple:common.bzl",
-    "entitlements_validation_mode",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:bundling_support.bzl",
     "bundling_support",
 )
@@ -33,6 +29,10 @@ load(
 load(
     "@build_bazel_rules_apple//apple/bundling:plist_support.bzl",
     "plist_support",
+)
+load(
+    "@build_bazel_rules_apple//apple:common.bzl",
+    "entitlements_validation_mode",
 )
 load(
     "@build_bazel_rules_apple//apple:utils.bzl",
@@ -302,8 +302,7 @@ entitlements = rule(
             mandatory = True,
         ),
         "entitlements": attr.label(
-            allow_files = [".entitlements", ".plist"],
-            single_file = True,
+            allow_single_file = [".entitlements", ".plist"],
         ),
         "_plisttool": attr.label(
             cfg = "host",
@@ -322,8 +321,7 @@ entitlements = rule(
         # Used to pass the platform type through from the calling rule.
         "platform_type": attr.string(),
         "provisioning_profile": attr.label(
-            allow_files = [".mobileprovision", ".provisionprofile"],
-            single_file = True,
+            allow_single_file = [".mobileprovision", ".provisionprofile"],
         ),
         "validation_mode": attr.string(),
         # This needs to be an attribute on the rule for platform_support

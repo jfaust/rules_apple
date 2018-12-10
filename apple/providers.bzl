@@ -36,6 +36,14 @@ where the signed bundle was constructed (before archiving). Other rules
 want to read that path from the provider to avoid unzipping the output
 archive.
 """,
+        "binary": """
+`File`. The binary (executable, dynamic library, etc.) that was bundled. The
+physical file is identical to the one inside the bundle except that it is
+always unsigned, so note that it is _not_ a path to the binary inside your
+output bundle. The primary purpose of this field is to provide a way to access
+the binary directly at analysis time; for example, for code coverage.
+""",
+        # TODO(b/118772102): Remove this field.
         "bundle_dir": "`File`. The directory that represents the bundle.",
         "bundle_id": """
 `string`. The bundle identifier (i.e., `CFBundleIdentifier` in
@@ -92,25 +100,6 @@ Boolean. True if Swift is used by the target propagating this
 provider. This does not consider embedded bundles; for example, an
 Objective-C application containing a Swift extension would have this field
 set to true for the extension but false for the application.
-""",
-    },
-)
-
-AppleBundlingSwiftInfo = provider(
-    doc = """
-Provides information about whether Swift needs to be bundled with a target.
-
-The `AppleBundlingSwiftInfo` provider is used to indicate whether Swift is
-required by any code in the bundle. Note that this only applies within the
-bundle's direct dependencies (`deps`); it does not pass through
-application/extension boundaries. For example, if an extension uses Swift but an
-application does not, then the application does not "use Swift" as defined by
-this provider.
-""",
-    fields = {
-        "uses_swift": """
-Boolean. True if Swift is used by the target propagating this
-provider or by any of its transitive dependencies.
 """,
     },
 )
@@ -172,6 +161,18 @@ between frameworks and application bundles.
     },
 )
 
+AppleResourceBundleInfo = provider(
+    doc = """
+Denotes that a target is an Apple resource bundle.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an Apple resource bundle
+(and not some other Apple bundle). Rule authors who wish to require that a
+dependency is an Apple resource bundle should use this provider to describe that
+requirement.
+""",
+)
+
 IosApplicationBundleInfo = provider(
     doc = """
 Denotes that a target is an iOS application.
@@ -216,6 +217,42 @@ This provider does not contain any fields of its own at this time but is used as
 a "marker" to indicate that a target is specifically an iOS static framework
 bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS static framework should use this provider to describe
+that requirement.
+""",
+)
+
+IosImessageApplicationBundleInfo = provider(
+    doc = """
+Denotes that a target is an iOS iMessage application.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an iOS iMessage application
+bundle (and not some other Apple bundle). Rule authors who wish to require that
+a dependency is an iOS iMessage application should use this provider to describe
+that requirement.
+""",
+)
+
+IosImessageExtensionBundleInfo = provider(
+    doc = """
+Denotes that a target is an iOS iMessage extension.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an iOS iMessage extension
+bundle (and not some other Apple bundle). Rule authors who wish to require that
+a dependency is an iOS iMessage extension should use this provider to describe
+that requirement.
+""",
+)
+
+IosStickerPackExtensionBundleInfo = provider(
+    doc = """
+Denotes that a target is an iOS Sticker Pack extension.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an iOS Sticker Pack extension
+bundle (and not some other Apple bundle). Rule authors who wish to require that
+a dependency is an iOS Sticker Pack extension should use this provider to describe
 that requirement.
 """,
 )

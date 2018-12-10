@@ -55,6 +55,13 @@ EOF
 load("@build_bazel_rules_apple//apple:ios.bzl",
      "ios_application", "ios_framework")
 
+genrule(
+    name = "gen_file",
+    srcs = [],
+    outs = ["gen_file.txt"],
+    cmd = "echo 'this is generated' > \"\$@\"",
+)
+
 objc_library(
     name = "resource_only_lib",
     resources = ["resource_only_lib.txt"]
@@ -70,12 +77,19 @@ objc_library(
         "@build_bazel_rules_apple//test/testdata/resources:basic_bundle",
     ],
     resources = [
+        "gen_file.txt",
         "@build_bazel_rules_apple//test/testdata/resources:nonlocalized.plist",
         "@build_bazel_rules_apple//test/testdata/resources:sample.png",
     ],
     strings = [
         "@build_bazel_rules_apple//test/testdata/resources:nonlocalized.strings",
     ],
+    deps = [":resource_only_lib"],
+)
+
+objc_library(
+    name = "shared_lib_with_no_direct_resources",
+    srcs = ["@bazel_tools//tools/objc:dummy.c"],
     deps = [":resource_only_lib"],
 )
 
@@ -93,68 +107,13 @@ objc_library(
     ],
     deps = [":shared_lib", ":resource_only_lib"],
 )
-EOF
-}
 
-function test_resources_only_in_framework() {
-  create_basic_project
-
-  cat >> app/BUILD <<EOF
-ios_framework(
-    name = "framework",
-    bundle_id = "com.framework",
-    families = ["iphone"],
-    infoplists = ["Info.plist"],
-    minimum_os_version = "8",
-    deps = [":shared_lib"],
-)
-
-ios_application(
-    name = "app",
-    bundle_id = "com.app",
-    families = ["iphone"],
-    frameworks = [":framework"],
-    infoplists = ["Info.plist"],
-    minimum_os_version = "8",
-    deps = [":app_lib"],
+objc_library(
+    name = "app_lib_with_no_direct_resources",
+    srcs = ["main.m"],
+    deps = [":shared_lib_with_no_direct_resources"],
 )
 EOF
-
-  do_build ios //app:app --define=apple.experimental.smart_dedupe=0 \
-      || fail "Should build"
-
-  # This test makes sure that without smart deduplication, the naive duplication
-  # method is preserved. When smart deduplication is enabled by default, this
-  # test should be removed.
-
-  # Verify framework has resources
-  assert_assets_contains "test-bin/app/framework.zip" \
-      "framework.framework/Assets.car" "star.png"
-  assert_zip_contains "test-bin/app/framework.zip" \
-      "framework.framework/nonlocalized.plist"
-  assert_zip_contains "test-bin/app/framework.zip" \
-      "framework.framework/nonlocalized.strings"
-  assert_zip_contains "test-bin/app/framework.zip" \
-      "framework.framework/sample.png"
-  assert_zip_contains "test-bin/app/framework.zip" \
-      "framework.framework/basic.bundle/basic_bundle.txt"
-  assert_zip_contains "test-bin/app/framework.zip" \
-      "framework.framework/resource_only_lib.txt"
-
-  # These resources are referenced by app_lib, but naive deduplication removes
-  # them from the app bundle.
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/Assets.car"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/sample.png"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/basic.bundle/basic_bundle.txt"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/nonlocalized.plist"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/nonlocalized.strings"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "framework.framework/resource_only_lib.txt"
 }
 
 function test_resources_in_app_and_framework() {
@@ -176,14 +135,13 @@ ios_application(
     families = ["iphone"],
     frameworks = [":framework"],
     infoplists = ["Info.plist"],
-    minimum_os_version = "8",
+    minimum_os_version = "9",
     strings = ["app.strings"],
     deps = [":app_lib"],
 )
 EOF
 
-  do_build ios //app:app --define=apple.experimental.smart_dedupe=1 \
-      || fail "Should build"
+  do_build ios //app:app || fail "Should build"
 
   # Verify framework has resources
   assert_assets_contains "test-bin/app/framework.zip" \
@@ -198,6 +156,8 @@ EOF
       "framework.framework/basic.bundle/basic_bundle.txt"
   assert_zip_contains "test-bin/app/framework.zip" \
       "framework.framework/resource_only_lib.txt"
+  assert_zip_contains "test-bin/app/framework.zip" \
+      "framework.framework/gen_file.txt"
 
   # Because app_lib directly references these assets, smart dedupe ensures that
   # they are present in the same bundle as the binary that has app_lib, which
@@ -215,6 +175,8 @@ EOF
       "Payload/app.app/nonlocalized.plist"
   assert_zip_not_contains "test-bin/app/app.ipa" \
       "Payload/app.app/nonlocalized.strings"
+  assert_zip_not_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/gen_file.txt"
 
   # This file is added by the top level bundling target, so it should be present
   # at the top level bundle.
@@ -228,6 +190,40 @@ EOF
   # in both the framework and the app. But when accounting for the lack of
   # sources in :resource_only_lib, the resource is bundled in the app as well.
   assert_zip_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/resource_only_lib.txt"
+}
+
+function test_shared_resource_deduplicated_when_not_referenced_by_app_only_lib() {
+  create_basic_project
+
+  cat >> app/BUILD <<EOF
+ios_framework(
+    name = "framework",
+    bundle_id = "com.framework",
+    families = ["iphone"],
+    infoplists = ["Info.plist"],
+    minimum_os_version = "8",
+    deps = [":shared_lib_with_no_direct_resources"],
+)
+
+ios_application(
+    name = "app",
+    bundle_id = "com.app",
+    families = ["iphone"],
+    frameworks = [":framework"],
+    infoplists = ["Info.plist"],
+    minimum_os_version = "9",
+    strings = ["app.strings"],
+    deps = [":app_lib_with_no_direct_resources"],
+)
+EOF
+
+  do_build ios //app:app || fail "Should build"
+
+  # This is a tricky corner case, in which a resource only lib is depended by
+  # dependency chains that contain no other resources. In this very specific
+  # scenario, the resource might not be correctly deduplicated.
+  assert_zip_not_contains "test-bin/app/app.ipa" \
       "Payload/app.app/resource_only_lib.txt"
 }
 
@@ -260,8 +256,7 @@ ios_application(
 )
 EOF
 
-  do_build ios //app:app --define=apple.experimental.smart_dedupe=1 \
-      || fail "Should build"
+  do_build ios //app:app || fail "Should build"
 
   # Verify that the resource is in the framework.
   assert_zip_contains "test-bin/app/framework.zip" \

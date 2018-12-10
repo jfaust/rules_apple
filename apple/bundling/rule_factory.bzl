@@ -89,16 +89,20 @@ for their platform through either `simple_path_formats` or `macos_path_formats`.
 """
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:apple_bundling_aspect.bzl",
     "apple_bundling_aspect",
 )
 load(
     "@build_bazel_rules_apple//apple/bundling:entitlements.bzl",
     "AppleEntitlementsInfo",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/aspects:framework_import_aspect.bzl",
+    "framework_import_aspect",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/aspects:resource_aspect.bzl",
+    new_apple_resource_aspect = "apple_resource_aspect",
 )
 load(
     "@build_bazel_rules_apple//apple:common.bzl",
@@ -111,6 +115,10 @@ load(
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "swift_usage_aspect",
+)
+load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
 )
 
 # Serves as an enum to express if an attribute is unsupported, mandatory, or
@@ -131,7 +139,7 @@ def _is_valid_attribute_mode(mode):
 _common_tool_attributes = {
     "_dsym_info_plist_template": attr.label(
         cfg = "host",
-        single_file = True,
+        allow_single_file = True,
         default = Label(
             "@build_bazel_rules_apple//apple/bundling:dsym_info_plist_template",
         ),
@@ -148,9 +156,14 @@ _common_tool_attributes = {
     ),
     "_realpath": attr.label(
         cfg = "host",
-        allow_files = True,
-        single_file = True,
+        allow_single_file = True,
         default = Label("@build_bazel_rules_apple//tools/realpath"),
+        executable = True,
+    ),
+    "_swift_stdlib_tool": attr.label(
+        cfg = "host",
+        default = Label("@build_bazel_rules_apple//tools/swift_stdlib_tool"),
+        executable = True,
     ),
     "_xcrunwrapper": attr.label(
         cfg = "host",
@@ -187,18 +200,16 @@ _bundling_tool_attributes = {
     # platform.
     "_runner_template": attr.label(
         cfg = "host",
-        allow_files = True,
-        single_file = True,
+        allow_single_file = True,
         default = Label("@build_bazel_rules_apple//apple/bundling/runners:ios_sim_template"),
     ),
     "_process_and_sign_template": attr.label(
-        single_file = True,
+        allow_single_file = True,
         default = Label("@build_bazel_rules_apple//tools/bundletool:process_and_sign_template"),
     ),
     "_std_redirect_dylib": attr.label(
         cfg = "host",
-        allow_files = True,
-        single_file = True,
+        allow_single_file = True,
         default = Label("@bazel_tools//tools/objc:StdRedirect.dylib"),
     ),
     "_xctoolrunner": attr.label(
@@ -272,11 +283,17 @@ def _macos_path_formats(path_in_archive_format = "%s"):
     Returns:
       A dictionary of path format attributes for macOS bundles.
     """
+    # TODO(kaipi): Refactor these names to account for not returning only formats when we fully
+    # migrate to the experimental branch for bundling.
+
     return {
         "_bundle_binary_path_format": attr.string(default = "MacOS/%s"),
         "_bundle_contents_path_format": attr.string(default = "Contents/%s"),
         "_bundle_resources_path_format": attr.string(default = "Resources/%s"),
         "_path_in_archive_format": attr.string(default = path_in_archive_format),
+        "_new_bundle_relative_contents_path": attr.string(default = "Contents"),
+        "_new_contents_relative_binary_path": attr.string(default = "MacOS"),
+        "_new_contents_relative_resource_path": attr.string(default = "Resources"),
     }
 
 def _code_signing_attributes(code_signing):
@@ -311,8 +328,7 @@ def _code_signing_attributes(code_signing):
             fail("Internal error: If code_signing.skip_signing = False, then " +
                  "code_signing.provision_profile_extension must be provided.")
         code_signing_attrs["provisioning_profile"] = attr.label(
-            allow_files = [code_signing.provision_profile_extension],
-            single_file = True,
+            allow_single_file = [code_signing.provision_profile_extension],
         )
         code_signing_attrs["entitlements_validation"] = attr.string(
             default = entitlements_validation_mode.loose,
@@ -429,7 +445,7 @@ def _make_bundling_rule(
         configurable_attrs["infoplists"] = attr.label_list(
             allow_files = [".plist"],
             mandatory = want_mandatory,
-            non_empty = want_mandatory,
+            allow_empty = not want_mandatory,
         )
 
     if use_binary_rule:
@@ -437,7 +453,7 @@ def _make_bundling_rule(
             "binary": attr.label(
                 mandatory = False,
                 providers = binary_providers,
-                single_file = True,
+                allow_single_file = True,
             ),
             # Even for rules that don't bundle a user-provided binary (like
             # watchos_application and some ios_application/extension targets), the
@@ -449,7 +465,12 @@ def _make_bundling_rule(
             # transitive dependencies (for example using aspects), but exactly one
             # dependency (the binary) should be set.
             "deps": attr.label_list(
-                aspects = [apple_bundling_aspect, swift_usage_aspect],
+                aspects = [
+                    apple_bundling_aspect,
+                    swift_usage_aspect,
+                    new_apple_resource_aspect,
+                    framework_import_aspect,
+                ],
                 mandatory = True,
                 cfg = deps_cfg,
             ),
@@ -457,8 +478,13 @@ def _make_bundling_rule(
     else:
         binary_dep_attrs = {
             "deps": attr.label_list(
-                aspects = [apple_bundling_aspect, swift_usage_aspect],
-                cfg = apple_common.multi_arch_split,
+                aspects = [
+                    apple_bundling_aspect,
+                    swift_usage_aspect,
+                    new_apple_resource_aspect,
+                    framework_import_aspect,
+                ],
+                cfg = deps_cfg,
             ),
             # Required by apple_common.multi_arch_split on 'deps'.
             "platform_type": attr.string(mandatory = True),
@@ -536,11 +562,17 @@ def _simple_path_formats(path_in_archive_format = ""):
     Returns:
       A dictionary of path format attributes for iOS, tvOS, and watchOS bundles.
     """
+    # TODO(kaipi): Refactor these names to account for not returning only formats when we fully
+    # migrate to the experimental branch for bundling.
+
     return {
         "_bundle_binary_path_format": attr.string(default = "%s"),
         "_bundle_contents_path_format": attr.string(default = "%s"),
         "_bundle_resources_path_format": attr.string(default = "%s"),
         "_path_in_archive_format": attr.string(default = path_in_archive_format),
+        "_new_bundle_relative_contents_path": attr.string(default = ""),
+        "_new_contents_relative_binary_path": attr.string(default = ""),
+        "_new_contents_relative_resource_path": attr.string(default = ""),
     }
 
 # Define the loadable module that lists the exported symbols in this file.

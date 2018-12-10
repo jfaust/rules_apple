@@ -29,7 +29,11 @@ function tear_down() {
 # Creates common source, targets, and basic plist for macOS applications.
 function create_common_files() {
   cat > app/BUILD <<EOF
-load("@build_bazel_rules_apple//apple:macos.bzl", "macos_application")
+load("@build_bazel_rules_apple//apple:macos.bzl",
+     "macos_application",
+     "macos_bundle")
+load("@build_bazel_rules_apple//apple:apple.bzl",
+     "apple_framework_import")
 
 objc_library(
     name = "lib",
@@ -68,6 +72,55 @@ macos_application(
     minimum_os_version = "10.11",
     deps = [":lib"],
 )
+EOF
+}
+
+function create_minimal_macos_application_with_framework_import() {
+  cat >> app/BUILD <<EOF
+macos_application(
+    name = "app",
+    bundle_id = "my.bundle.id",
+    infoplists = ["Info.plist"],
+    minimum_os_version = "10.11",
+    deps = [
+        ":lib",
+        ":frameworkDependingLib",
+    ],
+)
+
+objc_library(
+    name = "frameworkDependingLib",
+    srcs = ["@bazel_tools//tools/objc:dummy.c"],
+    deps = [":fmwk"],
+)
+
+apple_framework_import(
+    name = "fmwk",
+    framework_imports = glob(["fmwk.framework/**"]),
+    is_dynamic = True,
+)
+EOF
+
+  mkdir -p app/fmwk.framework
+  cp $(rlocation build_bazel_rules_apple/test/testdata/binaries/empty_dylib_lipobin) \
+      app/fmwk.framework/fmwk
+
+  cat > app/fmwk.framework/Info.plist <<EOF
+Dummy plist
+EOF
+
+  cat > app/fmwk.framework/resource.txt <<EOF
+Dummy resource
+EOF
+
+  mkdir -p app/fmwk.framework/Headers
+  cat > app/fmwk.framework/Headers/fmwk.h <<EOF
+This shouldn't get included
+EOF
+
+  mkdir -p app/fmwk.framework/Modules
+  cat > app/fmwk.framework/Headers/module.modulemap <<EOF
+This shouldn't get included
 EOF
 }
 
@@ -307,12 +360,36 @@ EOF
 2
 EOF
 
+  mkdir -p app/subbundle
+
+  cat > app/subbundle/Info.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "APPL";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+
   cat >> app/BUILD <<EOF
+macos_bundle(
+    name = "subbundle",
+    additional_contents = {
+        ":simple.txt": "Simple",
+        "//app/filegroup": "Filegroup",
+    },
+    bundle_id = "my.bundle.id.subbundle",
+    infoplists = ["subbundle/Info.plist"],
+    minimum_os_version = "10.10",
+)
+
 macos_application(
     name = "app",
     additional_contents = {
         ":simple.txt": "Simple",
         "//app/filegroup": "Filegroup",
+        ":subbundle": "Embedded"
     },
     bundle_id = "my.bundle.id",
     infoplists = ["Info.plist"],
@@ -330,6 +407,11 @@ EOF
       "app.app/Contents/Filegroup/1.txt")"
   assert_equals "2" "$(unzip_single_file "test-bin/app/app.zip" \
       "app.app/Contents/Filegroup/nested/2.txt")"
+  assert_zip_contains "test-bin/app/app.zip" "app.app/Contents/Embedded/subbundle.bundle/Contents/Simple/simple.txt"
+  assert_zip_contains "test-bin/app/app.zip" "app.app/Contents/Embedded/subbundle.bundle/Contents/Filegroup/1.txt"
+  assert_zip_contains "test-bin/app/app.zip" "app.app/Contents/Embedded/subbundle.bundle/Contents/Filegroup/nested/2.txt"
+  assert_equals "simple" "$(unzip_single_file "test-bin/app/app.zip" \
+      "app.app/Contents/Embedded/subbundle.bundle/Contents/Simple/simple.txt")"
 }
 
 # Tests that the bundle_extension attribute changes the extension.
@@ -371,6 +453,29 @@ EOF
 
   assert_zip_not_contains "test-bin/app/app.zip" "app.app"
   assert_zip_contains "test-bin/app/app.zip" "app with space.app/"
+}
+
+# Tests that a prebuilt dynamic framework (i.e., objc_framework with is_dynamic
+# set to True) is bundled properly with the application.
+function test_prebuilt_dynamic_framework_dependency() {
+  create_common_files
+  create_minimal_macos_application_with_framework_import
+
+  do_build macos //app:app || fail "Should build"
+
+  # Verify that the binary, plist, and resources are included.
+  assert_zip_contains "test-bin/app/app.zip" \
+      "app.app/Contents/Frameworks/fmwk.framework/fmwk"
+  assert_zip_contains "test-bin/app/app.zip" \
+      "app.app/Contents/Frameworks/fmwk.framework/Info.plist"
+  assert_zip_contains "test-bin/app/app.zip" \
+      "app.app/Contents/Frameworks/fmwk.framework/resource.txt"
+
+  # Verify that Headers and Modules directories are excluded.
+  assert_zip_not_contains "test-bin/app/app.zip" \
+      "app.app/Contents/Frameworks/fmwk.framework/Headers/fmwk.h"
+  assert_zip_not_contains "test-bin/app/app.zip" \
+      "app.app/Contents/Frameworks/fmwk.framework/Modules/module.modulemap"
 }
 
 run_suite "macos_application bundling tests"

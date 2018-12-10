@@ -1,26 +1,9 @@
-package(
-    default_visibility = ["//visibility:public"],
-)
-
-licenses(["notice"])
-
 load(
     "//apple:ios.bzl",
     "ios_application",
-    "ios_extension",
     "ios_static_framework",
     "ios_ui_test",
     "ios_unit_test",
-)
-load(
-    "//apple:watchos.bzl",
-    "watchos_application",
-    "watchos_extension",
-)
-load(
-    "//apple:tvos.bzl",
-    "tvos_application",
-    "tvos_extension",
 )
 load(
     "//apple:macos.bzl",
@@ -30,9 +13,25 @@ load(
     "macos_unit_test",
 )
 load(
-    "//apple:swift.bzl",
+    "//apple:tvos.bzl",
+    "tvos_application",
+    "tvos_extension",
+)
+load(
+    "//apple:watchos.bzl",
+    "watchos_application",
+    "watchos_extension",
+)
+load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
     "swift_library",
 )
+
+package(
+    default_visibility = ["//visibility:public"],
+)
+
+licenses(["notice"])
 
 # iOS
 
@@ -92,6 +91,7 @@ ios_application(
 ios_static_framework(
     name = "ButtonsStaticFramework",
     bundle_name = "ButtonsStaticFramework",
+    minimum_os_version = "8.0",
     deps = [":ButtonsLib"],
 )
 
@@ -316,4 +316,9 @@ test_suite(
         ":ButtonsMacTests",
         # ":ButtonsMacUITests",
     ],
+)
+
+filegroup(
+    name = "all_files",
+    srcs = glob(["**"]),
 )

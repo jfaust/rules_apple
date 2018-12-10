@@ -28,10 +28,8 @@ function tear_down() {
   rm -rf framework
 }
 
-# Creates framework and app targets with common resources with the given
-# value for the dedupe_unbundled_resources attribute on ios_application.
+# Creates framework and app targets with common resources.
 function create_app_and_framework_with_common_resources() {
-  dedupe_unbundled_resources="$1"; shift
   cat > app/BUILD <<EOF
 load("@build_bazel_rules_apple//apple:ios.bzl",
      "ios_application",
@@ -56,7 +54,6 @@ filegroup(
 ios_application(
     name = "app",
     bundle_id = "my.bundle.id",
-    dedupe_unbundled_resources = ${dedupe_unbundled_resources},
     extensions = [":ext"],
     families = ["iphone"],
     frameworks = [":framework"],
@@ -69,7 +66,6 @@ ios_application(
 ios_extension(
     name = "ext",
     bundle_id = "my.bundle.id.extension",
-    dedupe_unbundled_resources = ${dedupe_unbundled_resources},
     families = ["iphone"],
     frameworks = [":framework"],
     infoplists = ["Info-Ext.plist"],
@@ -106,13 +102,11 @@ filegroup(
 EOF
 
   mkdir -p app/Images
-  cat > app/Images/app.png <<EOF
-This is fake image for the app
-EOF
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      app/Images/app.png
 
-  cat > app/Images/framework.png <<EOF
-This is fake image for the framework
-EOF
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      app/Images/framework.png
 
   cat > app/Info-Framework.plist <<EOF
 {
@@ -218,10 +212,9 @@ filegroup(
 )
 EOF
 
-mkdir -p framework/Images
-cat > framework/Images/foo.png <<EOF
-This is fake image
-EOF
+  mkdir -p framework/Images
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      framework/Images/foo.png
 
   cat > framework/Info.plist <<EOF
 {
@@ -448,6 +441,121 @@ EOF
       "Payload/app.app/basic.bundle"
 }
 
+# Usage: verify_new_resource_bundle_deduping [application_minimum_os] [framework_minimum_os]
+#
+# Verifies that resource bundles that are dependencies of a framework are
+# bundled with the framework if no deduplication is happening.
+#
+# NOTE: This does now use xibs, storyboards, xcassets to avoid flake from
+# ibtool/actool. See the note in the BUILD file.
+function verify_new_resource_bundle_deduping() {
+  application_minimum_os="$1"; shift
+  framework_minimum_os="$1"; shift
+
+  cat > app/BUILD <<EOF
+load("@build_bazel_rules_apple//apple:ios.bzl",
+     "ios_application",
+     "ios_framework"
+    )
+
+objc_library(
+    name = "lib",
+    srcs = ["main.m"],
+    deps = [":framework_lib"],
+)
+
+ios_application(
+    name = "app",
+    bundle_id = "my.bundle.id",
+    families = ["iphone"],
+    frameworks = [":framework"],
+    infoplists = ["Info-App.plist"],
+    minimum_os_version = "${application_minimum_os}",
+    provisioning_profile = "@build_bazel_rules_apple//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    deps = [":lib"],
+)
+
+ios_framework(
+    name = "framework",
+    hdrs = ["Framework.h"],
+    bundle_id = "my.bundle.id.framework",
+    families = ["iphone"],
+    infoplists = ["Info-Framework.plist"],
+    linkopts = ["-application_extension"],
+    minimum_os_version = "${framework_minimum_os}",
+    deps = [":framework_lib"],
+)
+
+objc_library(
+    name = "framework_lib",
+    srcs = [
+        "Framework.h",
+        "Framework.m",
+    ],
+    data = [
+        "@build_bazel_rules_apple//test/testdata/resources:new_basic_bundle",
+        "@build_bazel_rules_apple//test/testdata/resources:new_simple_bundle_library",
+    ],
+    alwayslink = 1,
+)
+EOF
+
+  cat > app/Info-Framework.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "FMWK";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+  cat > app/Info-App.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "APPL";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+
+  cat > app/main.m <<EOF
+int main(int argc, char **argv) {
+  return 0;
+}
+EOF
+
+  cat > app/Framework.h <<EOF
+#ifndef FRAMEWORK_FRAMEWORK_H_
+#define FRAMEWORK_FRAMEWORK_H_
+
+void doStuff();
+
+#endif  // FRAMEWORK_FRAMEWORK_H_
+EOF
+
+  cat > app/Framework.m <<EOF
+#import <Foundation/Foundation.h>
+
+void doStuff() {
+  NSLog(@"Framework method called\n");
+}
+EOF
+
+  do_build ios //app:app --define=apple.experimental.bundling=1 \
+      || fail "Should build"
+  # Assert that the framework contains the bundled files...
+  assert_zip_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/framework.framework/basic.bundle/basic_bundle.txt"
+  assert_zip_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/framework.framework/simple_bundle_library.bundle/generated.strings"
+  # ...and that the application doesn't.
+  assert_zip_not_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/simple_bundle_library.bundle"
+  assert_zip_not_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/basic.bundle"
+}
+
 # Tests that the bundled .framework contains the expected files.
 function test_framework_contains_expected_files() {
   create_minimal_ios_framework
@@ -638,10 +746,9 @@ filegroup(
 )
 EOF
 
-mkdir -p app/Images
-cat > app/Images/foo.png <<EOF
-This is fake image
-EOF
+  mkdir -p app/Images
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      app/Images/foo.png
 
   cat > app/Info-Framework.plist <<EOF
 {
@@ -793,10 +900,12 @@ EOF
       "Payload/app.app/PlugIns/ext.appex/Frameworks/framework.framework/framework"
 }
 
+
 # Tests that root-level resources depended on by both an application and its
-# framework end up in both if deduping isn't explicitly enabled.
-function test_root_level_resource_deduping_off() {
-  create_app_and_framework_with_common_resources False
+# framework end up in both bundles given that both bundles have explicit owners
+# on the resources
+function test_root_level_resource_smart_dedupe_keeps_resources() {
+  create_app_and_framework_with_common_resources
 
   do_build ios //app:app || fail "Should build"
   assert_zip_contains "test-bin/app/app.ipa" \
@@ -804,26 +913,6 @@ function test_root_level_resource_deduping_off() {
   assert_zip_contains "test-bin/app/app.ipa" \
       "Payload/app.app/Images/framework.png"
   assert_zip_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/PlugIns/ext.appex/Images/framework.png"
-  assert_zip_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/Images/app.png"
-}
-
-
-# Tests that root-level resources depended on by both an application and its
-# framework end up in the framework only if resource dedupng is on.
-function test_root_level_resource_deduping_on() {
-  create_app_and_framework_with_common_resources True
-
-  # Disable smart dedupe explicitly as this test only makes sense in that case.
-  # When it is enabled by default, we should delete this test.
-  do_build ios //app:app --define=apple.experimental.smart_dedupe=0 \
-      || fail "Should build"
-  assert_zip_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/Frameworks/framework.framework/Images/framework.png"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
-      "Payload/app.app/Images/framework.png"
-  assert_zip_not_contains "test-bin/app/app.ipa" \
       "Payload/app.app/PlugIns/ext.appex/Images/framework.png"
   assert_zip_contains "test-bin/app/app.ipa" \
       "Payload/app.app/Images/app.png"
@@ -897,14 +986,12 @@ filegroup(
 EOF
 
   mkdir -p app/Images
-  cat > app/Images/common.png <<EOF
-This is fake image for the app
-EOF
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      app/Images/common.png
 
   mkdir -p framework/Images
-  cat > framework/Images/common.png <<EOF
-This is fake image for the framework
-EOF
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      framework/Images/common.png
 
   cat > framework/Info-Framework.plist <<EOF
 {
@@ -962,6 +1049,14 @@ function test_resource_bundle_is_in_framework_same_min_os() {
 
 function test_resource_bundle_is_in_framework_different_min_os() {
   verify_resource_bundle_deduping "8.0" "9.0"
+}
+
+function test_apple_resource_bundle_is_in_framework_same_min_os() {
+  verify_new_resource_bundle_deduping "9.0" "9.0"
+}
+
+function test_apple_resource_bundle_is_in_framework_different_min_os() {
+  verify_new_resource_bundle_deduping "8.0" "9.0"
 }
 
 # Tests that resource bundles that are dependencies of a framework are
@@ -1087,7 +1182,7 @@ EOF
 # objc_framework), that the inner framework is propagated up to the application
 # and not nested in the outer framework.
 #
-# NOTE: This does now use xibs, storyboards, xcassets to avoid flake from
+# NOTE: This does not use xibs, storyboards, xcassets to avoid flake from
 # ibtool/actool. See the note in the BUILD file.
 function test_framework_depends_on_prebuilt_framework() {
   cat > app/BUILD <<EOF
@@ -1238,6 +1333,165 @@ EOF
       "Payload/app.app/Frameworks/outer_framework.framework/Frameworks/inner_framework.framework/resource.txt"
 }
 
+# Test that if an ios_framework target depends on a prebuilt framework (i.e.,
+# apple_framework_import), that the inner framework is propagated up to the
+# application and not nested in the outer framework.
+#
+# NOTE: This does not use xibs, storyboards, xcassets to avoid flake from
+# ibtool/actool. See the note in the BUILD file.
+function test_framework_depends_on_prebuilt_apple_framework_import() {
+  cat > app/BUILD <<EOF
+load("@build_bazel_rules_apple//apple:ios.bzl",
+     "ios_application",
+     "ios_framework"
+    )
+load("@build_bazel_rules_apple//apple:apple.bzl",
+     "apple_framework_import",
+    )
+
+objc_library(
+    name = "lib",
+    srcs = ["main.m"],
+)
+
+ios_application(
+    name = "app",
+    bundle_id = "my.bundle.id",
+    families = ["iphone"],
+    frameworks = [":outer_framework"],
+    infoplists = ["Info-App.plist"],
+    minimum_os_version = "9.0",
+    provisioning_profile = "@build_bazel_rules_apple//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    deps = [":lib"],
+)
+
+ios_framework(
+    name = "outer_framework",
+    hdrs = ["OuterFramework.h"],
+    bundle_id = "my.bundle.id.framework",
+    families = ["iphone"],
+    infoplists = ["Info-Framework.plist"],
+    linkopts = ["-application_extension"],
+    minimum_os_version = "9.0",
+    deps = [
+        ":inner_framework",
+        ":outer_framework_lib",
+    ],
+)
+
+objc_library(
+    name = "outer_framework_lib",
+    srcs = [
+        "OuterFramework.h",
+        "OuterFramework.m",
+    ],
+    alwayslink = 1,
+)
+
+apple_framework_import(
+    name = "inner_framework",
+    framework_imports = glob(["inner_framework.framework/**"]),
+    is_dynamic = True,
+)
+EOF
+
+  mkdir -p app/inner_framework.framework
+  cp $(rlocation build_bazel_rules_apple/test/testdata/binaries/empty_dylib_lipobin) \
+      app/inner_framework.framework/inner_framework
+
+  cat > app/inner_framework.framework/Info.plist <<EOF
+Dummy plist
+EOF
+
+  cat > app/inner_framework.framework/resource.txt <<EOF
+Dummy resource
+EOF
+
+  mkdir -p app/inner_framework.framework/Headers
+  cat > app/inner_framework.framework/Headers/fmwk.h <<EOF
+This shouldn't get included
+EOF
+
+  mkdir -p app/inner_framework.framework/Modules
+  cat > app/inner_framework.framework/Headers/module.modulemap <<EOF
+This shouldn't get included
+EOF
+
+  cat > app/Info-Framework.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "FMWK";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+  cat > app/Info-App.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "APPL";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+
+  cat > app/main.m <<EOF
+int main(int argc, char **argv) {
+  return 0;
+}
+EOF
+
+  cat > app/OuterFramework.h <<EOF
+#ifndef OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+#define OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+
+void outer();
+
+#endif  // OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+EOF
+
+  cat > app/OuterFramework.m <<EOF
+#import <Foundation/Foundation.h>
+
+void outer() {
+  NSLog(@"Outer framework method called\n");
+}
+EOF
+
+  cat > app/InnerFramework.h <<EOF
+#ifndef INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+#define INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+
+void inner();
+
+#endif  // INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+EOF
+
+  cat > app/InnerFramework.m <<EOF
+#import <Foundation/Foundation.h>
+
+void inner() {
+  NSLog(@"Inner framework method called\n");
+}
+EOF
+
+  do_build ios //app:app --define=apple.experimental.bundling=1 \
+      || fail "Should build"
+
+  # Assert that the inner framework was propagated to the application...
+  assert_zip_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/inner_framework.framework/inner_framework"
+  assert_zip_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/inner_framework.framework/resource.txt"
+
+  # ...and they aren't in the outer framework.
+  assert_zip_not_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/outer_framework.framework/Frameworks/inner_framework.framework/inner_framework"
+  assert_zip_not_contains "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/outer_framework.framework/Frameworks/inner_framework.framework/resource.txt"
+}
+
 # Tests that a warning is shown when an extension depends on a framework which
 # is not marked extension_safe.
 # TODO(cparsons): This should eventually cause failure instead of merely a
@@ -1368,10 +1622,9 @@ EOF
 }
 EOF
 
-mkdir -p app/Images
-cat > app/Images/foo.png <<EOF
-This is fake image
-EOF
+  mkdir -p app/Images
+  cp -f $(rlocation build_bazel_rules_apple/test/testdata/resources/sample.png) \
+      app/Images/foo.png
 
   cat > app/Framework-Info.plist <<EOF
 {
@@ -1722,6 +1975,189 @@ void doStuff() {
 EOF
 
   do_build ios //staticlib:gen_staticlib \
+      || fail "Should build static lib"
+
+  cp test-genfiles/staticlib/staticlib.a \
+      app/inner_framework_pregen
+
+  do_build ios //app:app -s || fail "Should build"
+
+  assert_binary_contains ios "test-bin/app/app.ipa" \
+      "Payload/app.app/Frameworks/outer_framework.framework/outer_framework" "doStuff"
+  assert_binary_not_contains ios "test-bin/app/app.ipa" \
+      "Payload/app.app/app" "doStuff"
+}
+
+# Test that if an ios_framework target depends on a prebuilt static library
+# framework (i.e., apple_framework_import), that the inner framework is
+# propagated up to the application and not nested in the outer framework.
+function test_framework_depends_on_prebuilt_static_apple_framework_import() {
+  cat > app/BUILD <<EOF
+load("@build_bazel_rules_apple//apple:ios.bzl",
+     "ios_application",
+     "ios_framework"
+    )
+load("@build_bazel_rules_apple//apple:apple.bzl",
+     "apple_framework_import",
+    )
+
+objc_library(
+    name = "lib",
+    srcs = ["main.m"],
+    deps = [
+        ":inner_framework",
+    ],
+)
+
+ios_application(
+    name = "app",
+    bundle_id = "my.bundle.id",
+    families = ["iphone"],
+    frameworks = [":outer_framework"],
+    infoplists = ["Info-App.plist"],
+    minimum_os_version = "9.0",
+    provisioning_profile = "@build_bazel_rules_apple//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    deps = [
+        ":lib",
+    ],
+)
+
+ios_framework(
+    name = "outer_framework",
+    hdrs = ["OuterFramework.h"],
+    bundle_id = "my.bundle.id.framework",
+    families = ["iphone"],
+    infoplists = ["Info-Framework.plist"],
+    linkopts = ["-application_extension"],
+    # Verify that deduping happens even for different minimum OS from the app.
+    minimum_os_version = "10.0",
+    deps = [
+        ":outer_framework_lib",
+    ],
+)
+
+objc_library(
+    name = "outer_framework_lib",
+    srcs = [
+        "OuterFramework.h",
+        "OuterFramework.m",
+    ],
+    deps = [
+        ":inner_framework",
+    ],
+    alwayslink = 1,
+)
+
+genrule(
+    name = "gen_static_framework",
+    srcs = [":inner_framework_pregen"],
+    outs = ["InnerFramework.framework/InnerFramework"],
+    cmd = "cp \$< \$@",
+)
+
+apple_framework_import(
+    name = "inner_framework",
+    framework_imports = glob(["InnerFramework.framework/**"]) + ["InnerFramework.framework/InnerFramework"],
+    is_dynamic = False,
+)
+EOF
+
+  mkdir -p app/InnerFramework.framework
+  mkdir -p app/InnerFramework.framework/Headers
+
+  cat > app/InnerFramework.framework/Info.plist <<EOF
+Dummy plist
+EOF
+
+  cat > app/InnerFramework.framework/Headers/InnerFramework.h <<EOF
+#ifndef INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+#define INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+
+void doStuff();
+
+#endif  // INNER_FRAMEWORK_INNER_FRAMEWORK_H_
+EOF
+  cp app/InnerFramework.framework/Headers/InnerFramework.h app/InnerFramework.h
+
+  cat > app/Info-Framework.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "FMWK";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+  cat > app/Info-App.plist <<EOF
+{
+  CFBundleIdentifier = "\${PRODUCT_BUNDLE_IDENTIFIER}";
+  CFBundleName = "\${PRODUCT_NAME}";
+  CFBundlePackageType = "APPL";
+  CFBundleShortVersionString = "1.0";
+  CFBundleVersion = "1.0";
+}
+EOF
+
+  cat > app/main.m <<EOF
+#import <InnerFramework/InnerFramework.h>
+
+int main(int argc, char **argv) {
+  doStuff();
+  return 0;
+}
+EOF
+
+  cat > app/OuterFramework.h <<EOF
+#ifndef OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+#define OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+
+void outer();
+
+#endif  // OUTER_FRAMEWORK_OUTER_FRAMEWORK_H_
+EOF
+
+  cat > app/OuterFramework.m <<EOF
+#import <Foundation/Foundation.h>
+#import <InnerFramework/InnerFramework.h>
+
+void outer() {
+  doStuff();
+  NSLog(@"Outer framework method called\n");
+}
+EOF
+
+  mkdir -p staticlib
+
+  cat > staticlib/BUILD <<EOF
+genrule(
+    name = "gen_staticlib",
+    srcs = [":dostuff_staticlib_lipo.a"],
+    outs = ["staticlib.a"],
+    cmd = "cp \$< \$@",
+)
+
+apple_static_library(
+    name = "dostuff_staticlib",
+    minimum_os_version = "9.0",
+    platform_type = "ios",
+    deps = [":dostuff_lib"],
+)
+
+objc_library(
+    name = "dostuff_lib",
+    srcs = [":dostuff.m"],
+)
+EOF
+
+  cat > staticlib/dostuff.m <<EOF
+#import <Foundation/Foundation.h>
+
+void doStuff() {
+  NSLog(@"doStuff called\n");
+}
+EOF
+
+  do_build ios //staticlib:gen_staticlib --define=apple.experimental.bundling=1 \
       || fail "Should build static lib"
 
   cp test-genfiles/staticlib/staticlib.a \

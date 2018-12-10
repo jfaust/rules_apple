@@ -15,13 +15,13 @@
 """Genrule which provides Apple's Xcode environment."""
 
 load(
-    "@bazel_skylib//lib:paths.bzl",
-    "paths",
-)
-load(
     "@build_bazel_rules_apple//apple:utils.bzl",
     "DARWIN_EXECUTION_REQUIREMENTS",
     "apple_action",
+)
+load(
+    "@bazel_skylib//lib:paths.bzl",
+    "paths",
 )
 
 def _compute_make_variables(
@@ -29,14 +29,16 @@ def _compute_make_variables(
         label,
         resolved_srcs,
         files_to_build):
+    resolved_srcs_list = resolved_srcs.to_list()
+    files_to_build_list = files_to_build.to_list()
     variables = {
-        "SRCS": cmd_helper.join_paths(" ", resolved_srcs),
-        "OUTS": cmd_helper.join_paths(" ", files_to_build),
+        "SRCS": " ".join([x.path for x in resolved_srcs_list]),
+        "OUTS": " ".join([x.path for x in files_to_build_list]),
     }
-    if len(resolved_srcs.to_list()) == 1:
-        variables["<"] = list(resolved_srcs)[0].path
-    if len(files_to_build.to_list()) == 1:
-        variables["@"] = list(files_to_build)[0].path
+    if len(resolved_srcs_list) == 1:
+        variables["<"] = resolved_srcs_list[0].path
+    if len(files_to_build_list) == 1:
+        variables["@"] = files_to_build_list[0].path
         variables["@D"] = paths.dirname(variables["@"])
     else:
         variables["@D"] = genfiles_dir.path + "/" + label.package
@@ -48,7 +50,7 @@ def _apple_genrule_impl(ctx):
         fail("apple_genrule must have one or more outputs", attr = "outs")
     files_to_build = depset(ctx.outputs.outs)
 
-    if ctx.attr.executable and len(files_to_build) > 1:
+    if ctx.attr.executable and len(files_to_build.to_list()) > 1:
         fail(
             "if genrules produce executables, they are allowed only one output. " +
             "If you need the executable=1 argument, then you should split this " +
@@ -59,7 +61,7 @@ def _apple_genrule_impl(ctx):
     label_dict = {}
     for dep in ctx.attr.srcs:
         resolved_srcs = depset(transitive = [resolved_srcs, dep.files])
-        label_dict[dep.label] = dep.files
+        label_dict[dep.label] = dep.files.to_list()
 
     resolved_inputs, argv, runfiles_manifests = ctx.resolve_command(
         command = ctx.attr.cmd,
@@ -68,7 +70,7 @@ def _apple_genrule_impl(ctx):
         make_variables = _compute_make_variables(
             ctx.genfiles_dir,
             ctx.label,
-            depset(resolved_srcs),
+            depset(resolved_srcs.to_list()),
             files_to_build,
         ),
         tools = ctx.attr.tools,
@@ -84,8 +86,8 @@ def _apple_genrule_impl(ctx):
 
     apple_action(
         ctx,
-        inputs = list(resolved_srcs) + resolved_inputs,
-        outputs = list(files_to_build),
+        inputs = resolved_srcs.to_list() + resolved_inputs,
+        outputs = files_to_build.to_list(),
         env = env,
         command = argv,
         progress_message = "%s %s" % (message, ctx.label),
@@ -109,7 +111,6 @@ _apple_genrule_inner = rule(
         "outs": attr.output_list(mandatory = True),
         "cmd": attr.string(mandatory = True),
         "message": attr.string(),
-        "output_licenses": attr.license(),
         "executable": attr.bool(default = False),
         "no_sandbox": attr.bool(),
         "_xcode_config": attr.label(default = configuration_field(

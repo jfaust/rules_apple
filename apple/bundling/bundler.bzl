@@ -19,23 +19,6 @@ This file is only meant to be imported by the platform-specific top-level rules
 """
 
 load(
-    "@bazel_skylib//lib:paths.bzl",
-    "paths",
-)
-load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBundleInfo",
-    "AppleExtraOutputsInfo",
-    "AppleResourceInfo",
-    "AppleResourceSet",
-    "apple_resource_set_utils",
-)
-load(
-    "@build_bazel_rules_apple//apple:utils.bzl",
-    "group_files_by_directory",
-    "optionally_prefixed_path",
-)
-load(
     "@build_bazel_rules_apple//apple/bundling:binary_support.bzl",
     "binary_support",
 )
@@ -88,12 +71,29 @@ load(
     "resource_actions",
 )
 load(
+    "@build_bazel_rules_apple//apple/bundling:smart_dedupe.bzl",
+    "smart_dedupe",
+)
+load(
     "@build_bazel_rules_apple//apple/bundling:swift_actions.bzl",
     "swift_actions",
 )
 load(
     "@build_bazel_rules_apple//apple/bundling:swift_support.bzl",
     "swift_support",
+)
+load(
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBundleInfo",
+    "AppleExtraOutputsInfo",
+    "AppleResourceInfo",
+    "AppleResourceSet",
+    "apple_resource_set_utils",
+)
+load(
+    "@build_bazel_rules_apple//apple:utils.bzl",
+    "group_files_by_directory",
+    "optionally_prefixed_path",
 )
 load(
     "@build_bazel_rules_apple//common:attrs.bzl",
@@ -108,8 +108,8 @@ load(
     "providers",
 )
 load(
-    "@build_bazel_rules_apple//apple/bundling:smart_dedupe.bzl",
-    "smart_dedupe",
+    "@bazel_skylib//lib:paths.bzl",
+    "paths",
 )
 
 # Directories inside .frameworks that should not be included in final
@@ -675,7 +675,7 @@ def _run(
         progress_description,
         bundle_id,
         binary_artifact,
-        additional_bundlable_files = depset(),
+        additional_bundlable_files = [],
         additional_resource_sets = [],
         avoid_propagated_framework_files = None,
         embedded_bundles = [],
@@ -894,7 +894,7 @@ def _run(
     smart_dedupe_enabled = define_utils.bool_value(
         ctx,
         "apple.experimental.smart_dedupe",
-        False,
+        True,
     )
     whitelisted_mapping = None
     if smart_dedupe_enabled:
@@ -1189,7 +1189,7 @@ def _run(
     if bundling_support.bundle_name_with_extension(ctx).endswith(".app"):
         experimental_bundling = "off"
     if experimental_bundling in ("bundle_and_archive", "bundle_only"):
-        out_bundle = ctx.experimental_new_directory(
+        out_bundle = ctx.actions.declare_directory(
             bundling_support.bundle_name_with_extension(ctx),
         )
         main_outputs.append(out_bundle)
@@ -1289,6 +1289,7 @@ def _run(
                       getattr(ctx.attr, "_extension_safe", False))
     apple_bundle_info_args = {
         "archive": ctx.outputs.archive,
+        "binary": binary_artifact,
         "bundle_dir": bundle_dir,
         "bundle_extension": bundling_support.bundle_extension(ctx),
         "bundle_id": bundle_id,

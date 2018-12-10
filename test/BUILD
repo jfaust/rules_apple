@@ -1,7 +1,3 @@
-package(default_visibility = ["//visibility:public"])
-
-licenses(["notice"])
-
 load(
     "//test:configurations.bzl",
     "IOS_CONFIGURATIONS",
@@ -15,6 +11,10 @@ load(
     "apple_multi_shell_test",
     "apple_shell_test",
 )
+
+package(default_visibility = ["//visibility:public"])
+
+licenses(["notice"])
 
 # To enable sharding of the apple_shell_test rules, invoke bazel with
 #   '--define bazel_rules_apple.shell_test_sharding=1'
@@ -116,7 +116,7 @@ apple_multi_shell_test(
 
 apple_multi_shell_test(
     name = "ios_application_swift_resources_test",
-    size = "medium",
+    size = "large",
     src = "ios_application_swift_resources_test.sh",
     configurations = IOS_CONFIGURATIONS,
     data = [
@@ -147,7 +147,17 @@ apple_multi_shell_test(
     data = [
         "//test/testdata/resources:resource_data_deps_ios",
     ],
-    flaky = 1,
+    shard_count = 5,
+)
+
+apple_multi_shell_test(
+    name = "ios_imessage_test",
+    size = "medium",
+    src = "ios_imessage_test.sh",
+    configurations = IOS_CONFIGURATIONS,
+    data = [
+        "//test/testdata/resources:resource_data_deps_ios",
+    ],
     shard_count = 5,
 )
 
@@ -197,6 +207,10 @@ apple_multi_shell_test(
     size = "medium",
     src = "macos_application_test.sh",
     configurations = MACOS_CONFIGURATIONS,
+    data = [
+        "//test/testdata/binaries:empty_dylib",
+        "//test/testdata/binaries:empty_staticlib",
+    ],
     shard_count = 8,
 )
 
@@ -242,13 +256,12 @@ apple_multi_shell_test(
     shard_count = 2,
 )
 
-# The swift_library test does not use any canned configurations; it controls
-# options manually for various tests.
-apple_shell_test(
-    name = "swift_library_test",
+apple_multi_shell_test(
+    name = "macos_dylib_test",
     size = "medium",
-    src = "swift_library_test.sh",
-    shard_count = 8,
+    src = "macos_dylib_test.sh",
+    configurations = MACOS_CONFIGURATIONS,
+    shard_count = 2,
 )
 
 apple_multi_shell_test(

@@ -1,9 +1,16 @@
+load(
+    "//apple:resources.bzl",
+    "apple_bundle_import",
+    "apple_resource_bundle",
+)
+
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
 exports_files([
     "launch_screen_ios.storyboard",
+    "launch_screen_ios.xib",
     "nonlocalized.plist",
     "nonlocalized.strings",
     "nonlocalized_resource.txt",
@@ -20,6 +27,7 @@ filegroup(
     srcs = [
         "BUILD",
         "launch_screen_ios.storyboard",
+        "launch_screen_ios.xib",
         "storyboard_ios.storyboard",
         "view_ios.xib",
         ":app_icons_ios",
@@ -82,6 +90,12 @@ objc_bundle(
     bundle_imports = [":basic_bundle_files"],
 )
 
+# This target should replace the objc_bundle target above once we migrate away from it.
+apple_bundle_import(
+    name = "new_basic_bundle",
+    bundle_imports = [":basic_bundle_files"],
+)
+
 filegroup(
     name = "basic_bundle_files",
     srcs = glob(["basic.bundle/**"]),
@@ -137,6 +151,38 @@ objc_bundle_library(
     ],
 )
 
+# This target should replace the objc_bundle_library target above once we migrate away from it.
+apple_resource_bundle(
+    name = "new_bundle_library_ios",
+    bundle_name = "bundle_library_ios",
+    infoplists = [
+        "Info-template.plist",
+    ],
+    resources = [
+        "generated.strings",
+        "nonlocalized.plist",
+        "nonlocalized.strings",
+        "nonlocalized_resource.txt",
+        "sample.png",
+        "storyboard_ios.storyboard",
+        "view_ios.xib",
+        ":assets_ios",
+        ":localized_generic_resources",
+        ":localized_plists",
+        ":localized_storyboards_ios",
+        ":localized_strings",
+        ":localized_xibs_ios",
+        ":mapping_model",
+        ":new_basic_bundle",
+        ":unversioned_datamodel",
+        ":versioned_datamodel",
+    ],
+    structured_resources = [
+        ":generate_structured_strings",
+        ":structured",
+    ],
+)
+
 objc_bundle_library(
     name = "bundle_library_macos",
     # TODO: asset_catalogs
@@ -172,6 +218,39 @@ objc_bundle_library(
     # TODO: xibs
 )
 
+# This target should replace the objc_bundle_library target above once we migrate away from it.
+apple_resource_bundle(
+    name = "new_bundle_library_macos",
+    bundle_name = "bundle_library_macos",
+    # TODO: Bazel seems to crash with an exception if given datamodels
+    # and targeting macOS. So until objc_bundle_library is redone in
+    # skylark we might just have to live this this.
+    infoplists = [
+        "Info-template.plist",
+    ],
+    resources = [
+        # TODO: asset_catalogs
+        ":new_basic_bundle",
+        ":mapping_model",
+        #    ":unversioned_datamodel",
+        #    ":versioned_datamodel",
+        "nonlocalized.plist",
+        ":localized_plists",
+        "sample.png",
+        "nonlocalized.strings",
+        "generated.strings",
+        ":localized_strings",
+        "nonlocalized_resource.txt",
+        ":localized_generic_resources",
+        # TODO: storyboards
+        # TODO: xibs
+    ],
+    structured_resources = [
+        ":generate_structured_strings",
+        ":structured",
+    ],
+)
+
 # This is just like :bundle_library_* but with a subset of the resources. The
 # subset are all the resources that don't require Apple's processing tools
 # (actool, ibtool, etc.) which some times fail for "reasons". This then
@@ -195,6 +274,30 @@ objc_bundle_library(
         "nonlocalized.strings",
         "generated.strings",
         ":localized_strings",
+    ],
+    structured_resources = [
+        ":generate_structured_strings",
+        ":structured",
+    ],
+)
+
+# This target should replace the objc_bundle_library target above once we migrate away from it.
+apple_resource_bundle(
+    name = "new_simple_bundle_library",
+    bundle_name = "simple_bundle_library",
+    infoplists = [
+        "Info-template.plist",
+    ],
+    resources = [
+        "generated.strings",
+        "nonlocalized.plist",
+        "nonlocalized.strings",
+        "nonlocalized_resource.txt",
+        "sample.png",
+        ":localized_generic_resources",
+        ":localized_plists",
+        ":localized_strings",
+        ":new_basic_bundle",
     ],
     structured_resources = [
         ":generate_structured_strings",
@@ -239,6 +342,11 @@ filegroup(
 
 objc_bundle(
     name = "settings_bundle_ios",
+    bundle_imports = [":settings_bundle_ios_files"],
+)
+
+apple_bundle_import(
+    name = "new_settings_bundle_ios",
     bundle_imports = [":settings_bundle_ios_files"],
 )
 

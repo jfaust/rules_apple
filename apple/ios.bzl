@@ -18,9 +18,6 @@ load(
     "@build_bazel_rules_apple//apple/bundling:binary_support.bzl",
     "binary_support",
 )
-
-# Alias the internal rules when we load them. This lets the rules keep their
-# original name in queries and logs since they collide with the wrapper macros.
 load(
     "@build_bazel_rules_apple//apple/bundling:ios_rules.bzl",
     _ios_application = "ios_application",
@@ -29,16 +26,30 @@ load(
     _ios_static_framework = "ios_static_framework",
 )
 load(
+    "@build_bazel_rules_apple//apple/bundling:product_support.bzl",
+    _apple_product_type = "apple_product_type",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:ios_rules.bzl",
+    _ios_imessage_application = "ios_imessage_application",
+    _ios_imessage_extension = "ios_imessage_extension",
+    _ios_sticker_pack_extension = "ios_sticker_pack_extension",
+)
+load(
     "@build_bazel_rules_apple//apple/testing:ios_rules.bzl",
     _ios_ui_test = "ios_ui_test",
     _ios_unit_test = "ios_unit_test",
 )
 
-# Explicitly export this because we want it visible to users loading this file.
-load(
-    "@build_bazel_rules_apple//apple/bundling:product_support.bzl",
-    "apple_product_type",
-)
+# Re-export rules that do not need overridden attributes.
+# TODO(b/118104491): Remove this export and move the rule definition back to this file.
+ios_imessage_application = _ios_imessage_application
+ios_sticker_pack_extension = _ios_sticker_pack_extension
+
+# Re-export apple_product_type.
+# TODO(b/117886202): Migrate usages of apple_product_type to common.bzl. We may not even need to
+# export apple_product_type once there is 1 rule per product type.
+apple_product_type = _apple_product_type
 
 def ios_application(name, **kwargs):
     """Builds and bundles an iOS application.
@@ -456,4 +467,23 @@ def ios_unit_test_suite(name, runners = [], tags = [], **kwargs):
         name = name,
         tests = tests,
         tags = tags,
+    )
+
+# TODO(b/118104491): Remove this macro and move the rule definition back to this file.
+def ios_imessage_extension(name, **kwargs):
+    """Macro to override the linkopts attribute to add required flags for iMessage extensions."""
+    frameworks = kwargs.pop("frameworks", [])
+
+    linkopts = kwargs.pop("linkopts", [])
+    linkopts.extend([
+        "-application_extension",
+        "-e",
+        "_NSExtensionMain",
+    ])
+    return _ios_imessage_extension(
+        name = name,
+        dylibs = frameworks,
+        frameworks = frameworks,
+        linkopts = linkopts,
+        **kwargs
     )

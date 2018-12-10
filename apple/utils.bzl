@@ -14,11 +14,8 @@
 
 """Utility functions for working with strings, lists, and files in Skylark."""
 
-XCRUNWRAPPER_LABEL = "@bazel_tools//tools/objc:xcrunwrapper"
-"""The label for xcrunwrapper tool."""
-
+# Standard execution requirements to force building on Mac.
 DARWIN_EXECUTION_REQUIREMENTS = {"requires-darwin": ""}
-"""Standard execution requirements to force building on Mac."""
 
 def apple_action(ctx, **kw):
     """Creates an action that only runs on MacOS/Darwin.
@@ -34,7 +31,12 @@ def apple_action(ctx, **kw):
         execution_requirements["no-sandbox"] = "1"
 
     kw["execution_requirements"] = execution_requirements
-    ctx.action(**kw)
+
+    # Disable the lint warning because this can't be remapped, it needs
+    # to be split into run and run_shell, which is pending work.
+    # ...and disabling the linter doesn't work:
+    # github.com/bazelbuild/buildtools/issues/458
+    ctx.action(**kw)  # buildozer: disable=ctx-actions
 
 def apple_actions_run(ctx_actions, **kw):
     """Creates an actions.run() that only runs on MacOS/Darwin.
@@ -165,10 +167,8 @@ def group_files_by_directory(files, extensions, attr):
             if after_index != -1:
                 not_matched = False
                 container = path[:after_index]
-                if container in grouped_files:
-                    grouped_files[container] += [f]
-                else:
-                    grouped_files[container] = depset([f])
+                contained_files = grouped_files.setdefault(container, default = [])
+                contained_files.append(f)
 
                 # No need to check other extensions
                 break
@@ -181,7 +181,26 @@ def group_files_by_directory(files, extensions, attr):
         fail("Expected only files inside directories named with the extensions " +
              "%r, but found: %s" % (extensions, formatted_files), attr)
 
-    return grouped_files
+    return {k: depset(v) for k, v in grouped_files.items()}
+
+def is_xcode_at_least_version(xcode_config, desired_version):
+    """Returns True if we are building with at least the given Xcode version.
+
+    Args:
+        xcode_config: the `apple_common.XcodeVersionConfig` provider.
+        desired_version: The minimum desired Xcode version, as a dotted version string.
+
+    Returns:
+        True if the current target is being built with a version of Xcode at least as high as the
+        given version.
+    """
+    current_version = xcode_config.xcode_version()
+    if not current_version:
+        fail("Could not determine Xcode version at all. This likely means Xcode isn't " +
+             "available; if you think this is a mistake, please file an issue.")
+
+    desired_version_value = apple_common.dotted_version(desired_version)
+    return current_version >= desired_version_value
 
 def join_commands(cmds):
     """Joins a list of shell commands with ' && '.
